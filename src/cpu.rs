@@ -1,7 +1,6 @@
-#![allow(dead_code, unused_variables)]
-
 extern crate rand;
 
+use display;
 use ram;
 use types::*;
 
@@ -18,10 +17,19 @@ pub struct CPU<'a> {
     st: u8,
 
     ram: &'a mut ram::RAM,
+    display: &'a mut display::Display,
 }
 
 impl<'a> CPU<'a> {
-    pub fn new(ram: &mut ram::RAM) -> CPU {
+    pub fn new(ram: &'a mut ram::RAM,
+               display: &'a mut display::Display)
+               -> CPU<'a> {
+        // Load FONTSET into RAM
+        for (i, byte) in FONTSET.iter().enumerate() {
+            // i'm just going to unwrap this, since I know it won't fail.
+            ram.store_u8(i as u16, *byte).unwrap();
+        }
+
         CPU {
             cycle: 0,
 
@@ -35,10 +43,11 @@ impl<'a> CPU<'a> {
             st: 0,
 
             ram: ram,
+            display: display,
         }
     }
 
-    pub fn cycle(&mut self) -> Result<bool, String> {
+    pub fn cycle(&mut self) -> Result<(), String> {
         let instr = self.ram.load_u16(self.pc)?;
 
         println!("{} [0x{:03x}] : 0x{:04x} : {}",
@@ -57,9 +66,7 @@ impl<'a> CPU<'a> {
         match instr.nibble_at(0) {
             // 00E0 - CLS
             // Clear the display.
-            0x0 if nnn == 0x0E0 => {
-                println!("  Unimplemented");
-            }
+            0x0 if nnn == 0x0E0 => self.display.clear(),
             // 00EE - RET
             // Return from a subroutine.
             // The interpreter sets the program counter to the address at
@@ -68,10 +75,8 @@ impl<'a> CPU<'a> {
                 // I'm assuming you can't RET when the stack is clear...
                 self.pc = match self.stack.pop() {
                     Some(addr) => addr,
-                    None => {
-                        return Err("[CPU] Cannot RET when stack is empty!"
-                                       .to_string());
-                    }
+                    None => return Err("[CPU] Cannot RET when stack is empty!"
+                                           .to_string()),
                 }
             }
             // 0nnn - SYS addr
@@ -206,17 +211,27 @@ impl<'a> CPU<'a> {
             // Display n-byte sprite starting at memory location I at
             // (Vx, Vy), set VF = collision.
             // The interpreter reads n bytes from memory, starting at the
-            // address stored in I. These bytes are then displayed as
-            // sprites on screen at coordinates (Vx, Vy). Sprites are XORed
-            // onto the existing screen. If this causes any pixels to be
-            // erased, VF is set to 1, otherwise it is set to 0. If the
-            // sprite is positioned so part of it is outside the coordinates
-            // of the display, it wraps around to the opposite side of the
-            // screen. See instruction 8xy3 for more information on XOR, and
-            // section 2.4, Display, for more information on the Chip-8
-            // screen and sprites.
+            // address stored in I.
+            // These bytes are then displayed as sprites on screen at
+            // coordinates (Vx, Vy).
+            // Sprites are XORed onto the existing screen.
+            // If this causes any pixels to be erased, VF is set to 1, otherwise
+            // it is set to 0.
+            // If the sprite is positioned so part of it is outside the
+            // coordinates of the display, it wraps around to the opposite side
+            // of the screen.
             0xD => {
-                println!("  Unimplemented");
+                // check for Unexpected address overflow
+                match self.i.checked_add(instr.nibble_at(3) as u16) {
+                    None => return Err("[CPU] Unexpected Overflow".to_string()),
+                    Some(_) => (),
+                }
+
+                let sprite = (self.i..(self.i + instr.nibble_at(3) as u16))
+                    .map(|addr| self.ram.load_u8(addr))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                self.display.draw(self.v[x], self.v[y], &sprite);
             }
             // Ex9E - SKP Vx
             // Skip next instruction if key with the value of Vx is pressed.
@@ -267,9 +282,10 @@ impl<'a> CPU<'a> {
                 // hexadecimal sprite corresponding to the value of Vx.
                 // See section 2.4, Display, for more information on the
                 // Chip-8 hexadecimal font.
-                0x29 => {
-                    println!("  Unimplemented - font thing");
-                }
+                // NOTE: Not sure how permissive I should be. I'm assuming
+                //       being strict
+                0x29 if self.v[x] <= 0xF => self.i = self.v[x] as u16 * 5,
+                0x29 => return Err("[CPU] Invalid Opcode".to_string()),
                 // Fx33 - LD B, Vx
                 // Store BCD representation of Vx in memory locations I,
                 // I+1, and I+2.
@@ -278,7 +294,9 @@ impl<'a> CPU<'a> {
                 // the tens digit at location I+1, and the ones digit at
                 // location I+2.
                 0x33 => {
-                    println!("  Unimplemented - BCD");
+                    self.ram.store_u8(self.i + 0, self.v[x] / 1 % 10)?;
+                    self.ram.store_u8(self.i + 1, self.v[x] / 10 % 10)?;
+                    self.ram.store_u8(self.i + 2, self.v[x] / 100 % 100)?;
                 }
                 // Fx55 - LD [I], Vx
                 // Store registers V0 through Vx in memory starting at
@@ -311,6 +329,27 @@ impl<'a> CPU<'a> {
         self.pc += 2;
         self.cycle += 1;
 
-        Ok(true)
+        Ok(())
     }
 }
+
+
+#[cfg_attr(rustfmt, rustfmt_skip)]
+static FONTSET: [u8; 80] = [
+  /* 0 */ 0xF0, 0x90, 0x90, 0x90, 0xF0,
+  /* 1 */ 0x20, 0x60, 0x20, 0x20, 0x70,
+  /* 2 */ 0xF0, 0x10, 0xF0, 0x80, 0xF0,
+  /* 3 */ 0xF0, 0x10, 0xF0, 0x10, 0xF0,
+  /* 4 */ 0x90, 0x90, 0xF0, 0x10, 0x10,
+  /* 5 */ 0xF0, 0x80, 0xF0, 0x10, 0xF0,
+  /* 6 */ 0xF0, 0x80, 0xF0, 0x90, 0xF0,
+  /* 7 */ 0xF0, 0x10, 0x20, 0x40, 0x40,
+  /* 8 */ 0xF0, 0x90, 0xF0, 0x90, 0xF0,
+  /* 9 */ 0xF0, 0x90, 0xF0, 0x10, 0xF0,
+  /* A */ 0xF0, 0x90, 0xF0, 0x90, 0x90,
+  /* B */ 0xE0, 0x90, 0xE0, 0x90, 0xE0,
+  /* C */ 0xF0, 0x80, 0x80, 0x80, 0xF0,
+  /* D */ 0xE0, 0x90, 0x90, 0x90, 0xE0,
+  /* E */ 0xF0, 0x80, 0xF0, 0x80, 0xF0,
+  /* F */ 0xF0, 0x80, 0xF0, 0x80, 0x80,
+];
