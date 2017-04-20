@@ -1,6 +1,6 @@
 use types::*;
 
-pub fn disasm(word: Word) -> String {
+pub fn disasm(word: u16) -> String {
     // these aren't used in *every* instruction, but they are nice values to
     // calculate. It helps keep the code clean :)
     let x = word.nibble_at(1);
@@ -9,11 +9,9 @@ pub fn disasm(word: Word) -> String {
     let kk = word & 0x00FF;
 
     match word.nibble_at(0) {
-        0x0 => match nnn {
-            0x0E0 => format!("CLS"),
-            0x0EE => format!("RET"),
-            _ => format!(".word   0x{:04x}", word),
-        },
+        0x0 if nnn == 0x0E0 => format!("CLS"),
+        0x0 if nnn == 0x0EE => format!("RET"),
+        0x0 => format!(".word   0x{:04x}", word),
         0x1 => format!("JP      0x{:03x}", nnn),
         0x2 => format!("CALL    0x{:03x}", nnn),
         0x3 => format!("SE      V{:x}, {}", x, kk),
@@ -38,11 +36,9 @@ pub fn disasm(word: Word) -> String {
         0xB => format!("JP      V0, 0x{:03x}", nnn),
         0xC => format!("RND     V{:x}, {}", x, kk),
         0xD => format!("DRW     V{:x}, V{:x}, {}", x, y, word.nibble_at(3)),
-        0xE => match kk {
-            0x9E => format!("SKP     V{:x}", x),
-            0xA1 => format!("SKNP    V{:x}", x),
-            _ => format!(".word   0x{:04x}", word),
-        },
+        0xE if kk == 0x9E => format!("SKP     V{:x}", x),
+        0xE if kk == 0xA1 => format!("SKNP    V{:x}", x),
+        0xE => format!(".word   0x{:04x}", word),
         0xF => match kk {
             0x07 => format!("LD      V{:x}, DT", x),
             0x0A => format!("LD      V{:x}, K", x),

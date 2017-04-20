@@ -1,0 +1,6 @@
+max_width = 80
+reorder_imports = true
+reorder_imported_names = true
+wrap_comments = true
+wrap_match_arms = false
+array_width = 80
