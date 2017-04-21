@@ -4,7 +4,7 @@ use display;
 use ram;
 use types::*;
 
-pub struct CPU<'a> {
+pub struct CPU<'a, T: 'a + display::Update> {
     cycle: u32,
 
     v: [u8; 16],
@@ -17,16 +17,40 @@ pub struct CPU<'a> {
     st: u8,
 
     ram: &'a mut ram::RAM,
-    display: &'a mut display::Display,
+    display: &'a T,
 }
 
-impl<'a> CPU<'a> {
-    pub fn new(ram: &'a mut ram::RAM,
-               display: &'a mut display::Display)
-               -> CPU<'a> {
+use std::fmt;
+impl<'a, T: display::Update> fmt::Display for CPU<'a, T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        let instr = self.ram.load_u16(self.pc).unwrap();
+
+        writeln!(formatter, "Cycle: {}\n", self.cycle)?;
+        writeln!(formatter, "[{:#03x}] {}\n", self.pc, instr.disasm())?;
+
+        for (i, r) in self.v.iter().enumerate() {
+            write!(formatter, "V{:x}: {:<3} (0x{:02x})  ", i, r, r)?;
+            if (i + 1) % 4 == 0 {
+                write!(formatter, "\n")?;
+            }
+        }
+
+        write!(formatter, "\n")?;
+        write!(formatter, " I: 0x{:03x} ", self.i)?;
+        write!(formatter, " DT: {} ", self.dt)?;
+        write!(formatter, " ST: {} ", self.st)?;
+
+        writeln!(formatter, " Stack: {:?}", self.stack)?;
+
+        write!(formatter, "\n")
+    }
+}
+
+impl<'a, T: display::Update> CPU<'a, T> {
+    pub fn new(ram: &'a mut ram::RAM, display: &'a T) -> CPU<'a, T> {
         // Load FONTSET into RAM
         for (i, byte) in FONTSET.iter().enumerate() {
-            // i'm just going to unwrap this, since I know it won't fail.
+            // i'm just going to unwrap this value, since I know it won't fail.
             ram.store_u8(i as u16, *byte).unwrap();
         }
 
@@ -48,13 +72,10 @@ impl<'a> CPU<'a> {
     }
 
     pub fn cycle(&mut self) -> Result<(), String> {
-        let instr = self.ram.load_u16(self.pc)?;
+        self.cycle += 1;
 
-        println!("{} [0x{:03x}] : 0x{:04x} : {}",
-                 self.cycle,
-                 self.pc,
-                 instr,
-                 instr.disasm());
+        let instr = self.ram.load_u16(self.pc)?;
+        self.pc += 2;
 
         // these values aren't used in *every* instruction, but they are nice
         // to have on hand. It helps keep the code clean :)
@@ -77,7 +98,7 @@ impl<'a> CPU<'a> {
                     Some(addr) => addr,
                     None => return Err("[CPU] Cannot RET when stack is empty!"
                                            .to_string()),
-                }
+                };
             }
             // 0nnn - SYS addr
             // Jump to a machine code routine at nnn.
@@ -229,7 +250,7 @@ impl<'a> CPU<'a> {
 
                 let sprite = (self.i..(self.i + instr.nibble_at(3) as u16))
                     .map(|addr| self.ram.load_u8(addr))
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<Result<Vec<u8>, _>>()?;
 
                 self.display.draw(self.v[x], self.v[y], &sprite);
             }
@@ -239,7 +260,7 @@ impl<'a> CPU<'a> {
             // value of Vx is currently in the down position, PC is
             // increased by 2.
             0xE if kk == 0x9E => {
-                println!("  Unimplemented");
+                panic!("  Unimplemented");
             }
             // ExA1 - SKNP Vx
             // Skip next instruction if key with the value of Vx is not pressed.
@@ -247,7 +268,7 @@ impl<'a> CPU<'a> {
             // value of Vx is currently in the up position, PC is increased
             // by 2.
             0xE if kk == 0xA1 => {
-                println!("  Unimplemented");
+                panic!("  Unimplemented");
             }
             0xE => return Err("[CPU] Invalid Opcode".to_string()),
             0xF => match kk {
@@ -261,7 +282,7 @@ impl<'a> CPU<'a> {
                 // All execution stops until a key is pressed, then the
                 // value of that key is stored in Vx.
                 0x0A => {
-                    println!("  Unimplemented");
+                    panic!("  Unimplemented");
                 }
                 // Fx15 - LD DT, Vx
                 // Set delay timer = Vx.
@@ -326,13 +347,9 @@ impl<'a> CPU<'a> {
             _ => (),
         };
 
-        self.pc += 2;
-        self.cycle += 1;
-
         Ok(())
     }
 }
-
 
 #[cfg_attr(rustfmt, rustfmt_skip)]
 static FONTSET: [u8; 80] = [

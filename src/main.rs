@@ -9,10 +9,10 @@ mod display;
 mod ram;
 mod types;
 
-// use types::*;
+use display::Render;
 
 fn main() {
-    let path = Path::new("roms/games/GUESS");
+    let path = Path::new("roms/games/MAZE");
 
     // try to open ROM file
     let f = match File::open(&path) {
@@ -42,13 +42,16 @@ fn main() {
     }
 
     // init display
-    let mut display = display::TermDisplay::new();
+    let display = display::TermDisplay::new();
 
     // init CPU
-    let mut cpu = cpu::CPU::new(&mut ram, &mut display);
+    let mut cpu = cpu::CPU::new(&mut ram, &display);
 
     // Loop!
     loop {
+        display.render();
+        println!("{}", cpu);
+
         match cpu.cycle() {
             Ok(_) => (),
             Err(why) => {
@@ -56,12 +59,12 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        std::thread::sleep(std::time::Duration::new(0, 1_000_000_000 / 100));
-    }
 
-    // // quick disasm test
-    // for (i, word) in bin.iter().enumerate() {
-    //     print!("0x{:03x} : 0x{:04x} : ", i * 2, word);
-    //     print!("{}\n", word.clone().disasm());
-    // }
+        // uncomment these lines for step-by-step debugging
+        use std::io;
+        let mut dummy = String::new();
+        io::stdin().read_line(&mut dummy).unwrap();
+
+        std::thread::sleep(std::time::Duration::new(0, 1_000_000_000 / 10000));
+    }
 }
