@@ -2,9 +2,27 @@ pub struct RAM {
     mem: [u8; 0x1000],
 }
 
+use types::Chip8Utils;
+
 impl RAM {
     pub fn new() -> RAM {
         RAM { mem: [0; 0x1000] }
+    }
+
+    pub fn print_around(&self, addr: u16) {
+        let addrs = (-3..3)
+            .map(|x| addr as i32 + x * 2)
+            .filter(|x| *x >= 0 && *x <= 0xFFF)
+            .map(|x| x as u16);
+
+        for _addr in addrs {
+            let val = self.load_u16(_addr).unwrap();
+            println!("{} 0x{:03x} | 0x{:04x} | {}",
+                     if _addr == addr { ">" } else { " " },
+                     _addr,
+                     val,
+                     val.disasm());
+        }
     }
 
     pub fn load_u16(&self, addr: u16) -> Result<u16, String> {

@@ -2,7 +2,7 @@ extern crate rand;
 
 use display;
 use ram;
-use types::*;
+use types::Chip8Utils;
 
 pub struct CPU<'a, T: 'a + display::Update> {
     cycle: u32,
@@ -23,6 +23,8 @@ pub struct CPU<'a, T: 'a + display::Update> {
 use std::fmt;
 impl<'a, T: display::Update> fmt::Display for CPU<'a, T> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        self.ram.print_around(self.pc);
+
         let instr = self.ram.load_u16(self.pc).unwrap();
 
         writeln!(formatter, "Cycle: {}\n", self.cycle)?;

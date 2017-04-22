@@ -47,24 +47,77 @@ fn main() {
     // init CPU
     let mut cpu = cpu::CPU::new(&mut ram, &display);
 
+    // Some Debug Vars
+    use DebugState::*;
+    let mut debug_state = Step;
+
     // Loop!
     loop {
+        if let Err(why) = cpu.cycle() {
+            println!("{}", why);
+            std::process::exit(1);
+        }
+
+        // TODO: All of this debug stuff should be in it's own module.
+        // I'm just spitballing here, but that module could just expose a struct
+        // *like* CPU (i.e: it has a .cycle() method), but that cycle method
+        // has all this extra logic...
+
+        debug_state = match debug_state {
+            Run => Run,
+            Step => Step,
+            CycleFor(n) => CycleFor(n - 1),
+        };
+
+        match debug_state {
+            Run => {
+                display.render();
+                println!("{}", cpu);
+                // const SLEEP_FOR: u32 = 100000000 / 2;
+                // std::thread::sleep(std::time::Duration::new(0, SLEEP_FOR));
+                continue;
+            }
+            Step => (),
+            CycleFor(0) => {
+                debug_state = Step;
+            }
+            CycleFor(_) => continue,
+        }
+
+
         display.render();
         println!("{}", cpu);
 
-        match cpu.cycle() {
-            Ok(_) => (),
-            Err(why) => {
-                println!("{}", why);
-                std::process::exit(1);
-            }
-        }
+        let mut string = String::new();
+        print!("{:?}> ", debug_state);
+        // TODO: error handle these bad-bois
+        std::io::stdout().flush().unwrap();
+        std::io::stdin().read_line(&mut string).unwrap();
 
-        // uncomment these lines for step-by-step debugging
-        use std::io;
-        let mut dummy = String::new();
-        io::stdin().read_line(&mut dummy).unwrap();
+        let mut words = string.split_whitespace();
 
-        std::thread::sleep(std::time::Duration::new(0, 1_000_000_000 / 10000));
+        debug_state = match words.next() {
+            Some("step") => match words.next() {
+                Some(n) => match n.trim().parse::<u32>() {
+                    Ok(n) => CycleFor(n),
+                    Err(_) => panic!("Cmd not recognized"),
+                },
+                None => Step,
+            },
+            Some("run") => Run,
+            Some(n) => match n.trim().parse::<u32>() {
+                Ok(n) => CycleFor(n),
+                Err(_) => panic!("Cmd not recognized"),
+            },
+            None => Step,
+        };
+
     }
+}
+
+#[derive(Debug)]
+enum DebugState {
+    Step,
+    Run,
+    CycleFor(u32),
 }
