@@ -47,21 +47,21 @@ fn main() {
     // init CPU
     let mut cpu = cpu::CPU::new(&mut ram, &display);
 
-    // Some Debug Vars
-    use DebugState::*;
-    let mut debug_state = Step;
+    // Debug Vars
+    let mut debug_state = DebugState::Step;
 
     // Loop!
-    loop {
-        if let Err(why) = cpu.cycle() {
+    'mainLoop: loop {
+        let status = cpu.cycle();
+
+        if let Err(why) = status {
             println!("{}", why);
-            std::process::exit(1);
+            break 'mainLoop;
         }
 
         // TODO: All of this debug stuff should be in it's own module.
-        // I'm just spitballing here, but that module could just expose a struct
-        // *like* CPU (i.e: it has a .cycle() method), but that cycle method
-        // has all this extra logic...
+
+        use DebugState::*;
 
         debug_state = match debug_state {
             Run => Run,
@@ -88,30 +88,50 @@ fn main() {
         display.render();
         println!("{}", cpu);
 
-        let mut string = String::new();
-        print!("{:?}> ", debug_state);
-        // TODO: error handle these bad-bois
-        std::io::stdout().flush().unwrap();
-        std::io::stdin().read_line(&mut string).unwrap();
+        // Handle debug input
+        'debugLoop: loop {
+            let mut string = String::new();
+            print!("{:?}> ", debug_state);
 
-        let mut words = string.split_whitespace();
+            // TODO: error handle these bad-bois
+            std::io::stdout().flush().unwrap();
+            std::io::stdin().read_line(&mut string).unwrap();
 
-        debug_state = match words.next() {
-            Some("step") => match words.next() {
-                Some(n) => match n.trim().parse::<u32>() {
-                    Ok(n) => CycleFor(n),
-                    Err(_) => panic!("Cmd not recognized"),
-                },
-                None => Step,
-            },
-            Some("run") => Run,
-            Some(n) => match n.trim().parse::<u32>() {
-                Ok(n) => CycleFor(n),
-                Err(_) => panic!("Cmd not recognized"),
-            },
-            None => Step,
-        };
+            let mut words = string.split_whitespace();
 
+            let next_debug_state: Option<DebugState> =
+                match words.next() {
+                    // run
+                    Some("run") => Some(Run),
+
+                    // step [num cycles]
+                    Some("step") => match words.next() {
+                        Some(n) => match n.trim().parse::<u32>() {
+                            Ok(n) => Some(CycleFor(n)),
+                            Err(_) => None,
+                        },
+                        None => Some(Step),
+                    },
+
+                    // exit
+                    Some("exit") => break 'mainLoop,
+
+                    // ???
+                    Some(_) => None,
+
+                    // If nothing was given, assume they just want to re-run the
+                    // previous command
+                    None => Some(Step),
+                };
+
+            match next_debug_state {
+                Some(x) => {
+                    debug_state = x;
+                    break 'debugLoop;
+                }
+                None => println!("Invalid Command"),
+            }
+        }
     }
 }
 
