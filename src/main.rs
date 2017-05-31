@@ -6,13 +6,18 @@ use std::path::Path;
 mod cpu;
 mod disasm;
 mod display;
+mod input;
 mod ram;
 mod types;
 
+// Don't want to change the display in main, just render it...
+
 use display::Render;
+use input::Get;
+use input::Set;
 
 fn main() {
-    let path = Path::new("roms/games/MAZE");
+    let path = Path::new("roms/games/PONG2");
 
     // try to open ROM file
     let f = match File::open(&path) {
@@ -30,10 +35,10 @@ fn main() {
         .map(|w| ((w[0] as u16) << 8) | (w[1] as u16))
         .collect();
 
-    // init RAM
+    // --- init RAM
     let mut ram = ram::RAM::new();
 
-    // Load ROM into RAM
+    // Before handing that RAM to the CPU, load the chosen ROM into RAM
     for (i, word) in bin.iter().enumerate() {
         if let Err(why) = ram.store_u16((0x200 + i * 2) as u16, *word) {
             println!("{}", why);
@@ -41,103 +46,144 @@ fn main() {
         }
     }
 
-    // init display
-    let display = display::TermDisplay::new();
+    // --- init display
+    let display = display::NcursesDisplay::new();
+    display.init();
 
-    // init CPU
-    let mut cpu = cpu::CPU::new(&mut ram, &display);
+    // --- init input
+    let input = input::NcursesInput::new();
 
-    // Debug Vars
-    let mut debug_state = DebugState::Step;
+    // --- init CPU,
+    // the CPU takes a handle to
+    //   - RAM
+    //   - Display
+    //   - Input
+    let mut cpu = cpu::CPU::new(&mut ram, &display, &input);
 
     // Loop!
     'mainLoop: loop {
-        let status = cpu.cycle();
+        // Each loop is 1/60th of a second
+        std::thread::sleep_ms(16); // ~ 1/60
 
-        if let Err(why) = status {
-            println!("{}", why);
-            break 'mainLoop;
-        }
-
-        // TODO: All of this debug stuff should be in it's own module.
-
-        use DebugState::*;
-
-        debug_state = match debug_state {
-            Run => Run,
-            Step => Step,
-            CycleFor(n) => CycleFor(n - 1),
-        };
-
-        match debug_state {
-            Run => {
-                display.render();
-                println!("{}", cpu);
-                // const SLEEP_FOR: u32 = 100000000 / 2;
-                // std::thread::sleep(std::time::Duration::new(0, SLEEP_FOR));
-                continue;
-            }
-            Step => (),
-            CycleFor(0) => {
-                debug_state = Step;
-            }
-            CycleFor(_) => continue,
-        }
-
-
-        display.render();
-        println!("{}", cpu);
-
-        // Handle debug input
-        'debugLoop: loop {
-            let mut string = String::new();
-            print!("{:?}> ", debug_state);
-
-            // TODO: error handle these bad-bois
-            std::io::stdout().flush().unwrap();
-            std::io::stdin().read_line(&mut string).unwrap();
-
-            let mut words = string.split_whitespace();
-
-            let next_debug_state: Option<DebugState> =
-                match words.next() {
-                    // run
-                    Some("run") => Some(Run),
-
-                    // step [num cycles]
-                    Some("step") => match words.next() {
-                        Some(n) => match n.trim().parse::<u32>() {
-                            Ok(n) => Some(CycleFor(n)),
-                            Err(_) => None,
-                        },
-                        None => Some(Step),
-                    },
-
-                    // exit
-                    Some("exit") => break 'mainLoop,
-
-                    // ???
-                    Some(_) => None,
-
-                    // If nothing was given, assume they just want to re-run the
-                    // previous command
-                    None => Some(Step),
-                };
-
-            match next_debug_state {
-                Some(x) => {
-                    debug_state = x;
-                    break 'debugLoop;
+        // Run the CPU faster than the screen refreshes
+        for _ in 0..20 {
+            // Run the cpu, and get it's state
+            let cpu_state = match cpu.cycle() {
+                // Shutdown everything if shit hits the fan
+                Err(why) => {
+                    println!("{}", why);
+                    break 'mainLoop;
                 }
-                None => println!("Invalid Command"),
+                Ok(state) => state,
+            };
+
+            // Check input, possibly blocking execution
+            input.update_keys(cpu_state == cpu::CPUState::WaitForInput);
+
+            if input.pressed_esc() {
+                break 'mainLoop;
             }
         }
-    }
-}
 
-#[derive(Debug)]
-enum DebugState {
-    Step,
-    Run,
-    CycleFor(u32),
+        // Decrement the time-based registers
+        cpu.decrement_st();
+        cpu.decrement_dt();
+
+        // ...
+        input.decrement_keys();
+
+        // Render the screen
+        display.render();
+
+        // Incredibly dirty debug...
+        extern crate ncurses;
+        use types::Chip8Utils;
+        use std;
+
+        ncurses::mv(33, 0);
+
+        // Print some ram
+        for dpc in -3i32..4i32 {
+            ncurses::printw(format!("{} {:#03x} : {}\n",
+                                    if dpc == 0 { "> " } else { "  " },
+                                    cpu.pc as i32 + dpc * 2,
+                                    cpu.ram
+                                        .load_u16((cpu.pc as i32 + dpc * 2) as
+                                                  u16)
+                                        .unwrap()
+                                        .disasm())
+                                    .as_ref());
+
+        }
+
+
+        // Print out the CPU state
+        ncurses::printw(format!("Cycle: {}\n\n", cpu.cycle).as_ref());
+
+        let instr = cpu.ram.load_u16(cpu.pc).unwrap();
+        ncurses::printw(format!("[{:#03x}] {}\n\n", cpu.pc, instr.disasm())
+                            .as_ref());
+
+        for (i, r) in cpu.v.iter().enumerate() {
+            ncurses::printw(format!("V{:x}: {:<3} (0x{:02x})  ", i, r, r)
+                                .as_ref());
+            if (i + 1) % 4 == 0 {
+                ncurses::printw("\n");
+            }
+        }
+
+        ncurses::printw("\n");
+        ncurses::printw(format!(" I: 0x{:03x} ", cpu.i).as_ref());
+        ncurses::printw(format!(" DT: {:02x} ", cpu.dt).as_ref());
+        ncurses::printw(format!(" ST: {:02x} ", cpu.st).as_ref());
+
+        ncurses::printw(format!(" Stack: {:?}\n", cpu.stack).as_ref());
+
+        ncurses::printw("\n");
+
+        // Keypad
+        for c in ['1', '2', '3', '4', 'q', 'w', 'e', 'r', 'a', 's', 'd', 'f',
+                  'z', 'x', 'c', 'v']
+                    .iter() {
+            let i = match *c {
+                '1' => 0x1,
+                '2' => 0x2,
+                '3' => 0x3,
+                '4' => 0xC,
+                'q' => 0x4,
+                'w' => 0x5,
+                'e' => 0x6,
+                'r' => 0xD,
+                'a' => 0x7,
+                's' => 0x8,
+                'd' => 0x9,
+                'f' => 0xE,
+                'z' => 0xA,
+                'x' => 0x0,
+                'c' => 0xB,
+                'v' => 0xF,
+                _ => return,
+            };
+
+            let val = cpu.input.keys.borrow()[i as usize];
+
+            ncurses::printw(format!("{:3} ", val).as_ref());
+
+            if *c == '4' || *c == 'r' || *c == 'f' || *c == 'v' {
+                ncurses::printw("\n");
+            }
+        }
+
+        // ncurses::timeout(-1);
+        // match ncurses::getch() {
+        //     ncurses::KEY_F1 => {
+        //         display.uninit();
+        //         return;
+        //     }
+        //     _ => (),
+        // };
+
+    }
+
+    display.uninit();
 }

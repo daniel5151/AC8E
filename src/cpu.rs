@@ -1,55 +1,41 @@
 extern crate rand;
 
 use display;
+use input;
 use ram;
 use types::Chip8Utils;
 
-pub struct CPU<'a, T: 'a + display::Update> {
-    cycle: u32,
-
-    v: [u8; 16],
-    i: u16,
-
-    pc: u16,
-    stack: Vec<u16>,
-
-    dt: u8,
-    st: u8,
-
-    ram: &'a mut ram::RAM,
-    display: &'a T,
+#[derive(PartialEq)]
+pub enum CPUState {
+    Running,
+    WaitForInput,
 }
 
-use std::fmt;
-impl<'a, T: display::Update> fmt::Display for CPU<'a, T> {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        self.ram.print_around(self.pc);
+pub struct CPU<'a, DisplayT: 'a + display::Update, InputT: 'a + input::Get> {
+    // PUB IS TEMPORARY, ONLY FOR DEBUG!
+    pub cycle: u32,
 
-        let instr = self.ram.load_u16(self.pc).unwrap();
+    pub v: [u8; 16],
+    pub i: u16,
 
-        writeln!(formatter, "Cycle: {}\n", self.cycle)?;
-        writeln!(formatter, "[{:#03x}] {}\n", self.pc, instr.disasm())?;
+    pub pc: u16,
+    pub stack: Vec<u16>,
 
-        for (i, r) in self.v.iter().enumerate() {
-            write!(formatter, "V{:x}: {:<3} (0x{:02x})  ", i, r, r)?;
-            if (i + 1) % 4 == 0 {
-                write!(formatter, "\n")?;
-            }
-        }
+    pub dt: u8,
+    pub st: u8,
 
-        write!(formatter, "\n")?;
-        write!(formatter, " I: 0x{:03x} ", self.i)?;
-        write!(formatter, " DT: {} ", self.dt)?;
-        write!(formatter, " ST: {} ", self.st)?;
-
-        writeln!(formatter, " Stack: {:?}", self.stack)?;
-
-        write!(formatter, "\n")
-    }
+    pub ram: &'a mut ram::RAM,
+    pub display: &'a DisplayT,
+    pub input: &'a InputT,
 }
 
-impl<'a, T: display::Update> CPU<'a, T> {
-    pub fn new(ram: &'a mut ram::RAM, display: &'a T) -> CPU<'a, T> {
+impl<'a, DisplayT: display::Update, InputT: input::Get> CPU<'a,
+                                                            DisplayT,
+                                                            InputT> {
+    pub fn new(ram: &'a mut ram::RAM,
+               display: &'a DisplayT,
+               input: &'a InputT)
+               -> CPU<'a, DisplayT, InputT> {
         // Load FONTSET into RAM
         for (i, byte) in FONTSET.iter().enumerate() {
             // i'm just going to unwrap this value, since I know it won't fail.
@@ -70,13 +56,23 @@ impl<'a, T: display::Update> CPU<'a, T> {
 
             ram: ram,
             display: display,
+            input: input,
         }
     }
 
-    pub fn cycle(&mut self) -> Result<(), String> {
+    pub fn decrement_dt(&mut self) {
+        self.dt -= if self.dt > 0 { 1 } else { 0 };
+    }
+
+    pub fn decrement_st(&mut self) {
+        self.st -= if self.st > 0 { 1 } else { 0 };
+    }
+
+    pub fn cycle(&mut self) -> Result<CPUState, String> {
         self.cycle += 1;
 
         let instr = self.ram.load_u16(self.pc)?;
+
         self.pc += 2;
 
         // these values aren't used in *every* instruction, but they are nice
@@ -107,7 +103,7 @@ impl<'a, T: display::Update> CPU<'a, T> {
             // This instruction is only used on the old computers on which
             // Chip-8 was originally implemented. It is ignored by modern
             // interpreters.
-            0x0 => println!("  Ignoring..."),
+            0x0 => (),
             // 1nnn - JP addr
             // Jump to location nnn.
             // The interpreter sets the program counter to nnn.
@@ -254,7 +250,8 @@ impl<'a, T: display::Update> CPU<'a, T> {
                     .map(|addr| self.ram.load_u8(addr))
                     .collect::<Result<Vec<u8>, _>>()?;
 
-                self.display.draw(self.v[x], self.v[y], &sprite);
+                self.v[0xF] =
+                    self.display.draw(self.v[x], self.v[y], &sprite) as u8;
             }
             // Ex9E - SKP Vx
             // Skip next instruction if key with the value of Vx is pressed.
@@ -262,7 +259,9 @@ impl<'a, T: display::Update> CPU<'a, T> {
             // value of Vx is currently in the down position, PC is
             // increased by 2.
             0xE if kk == 0x9E => {
-                panic!("  Unimplemented");
+                if self.input.pressed_key(self.v[x]) {
+                    self.pc += 2;
+                }
             }
             // ExA1 - SKNP Vx
             // Skip next instruction if key with the value of Vx is not pressed.
@@ -270,7 +269,9 @@ impl<'a, T: display::Update> CPU<'a, T> {
             // value of Vx is currently in the up position, PC is increased
             // by 2.
             0xE if kk == 0xA1 => {
-                panic!("  Unimplemented");
+                if !self.input.pressed_key(self.v[x]) {
+                    self.pc += 2;
+                }
             }
             0xE => return Err("[CPU] Invalid Opcode".to_string()),
             0xF => match kk {
@@ -284,7 +285,16 @@ impl<'a, T: display::Update> CPU<'a, T> {
                 // All execution stops until a key is pressed, then the
                 // value of that key is stored in Vx.
                 0x0A => {
-                    panic!("  Unimplemented");
+                    // I hate this instruction.
+                    // It makes my life so incredibly difficult...
+                    match self.input.last_press() {
+                        Some(key) => self.v[x] = key,
+                        None => {
+                            self.cycle -= 1;
+                            self.pc -= 2;
+                            return Ok(CPUState::WaitForInput);
+                        }
+                    }
                 }
                 // Fx15 - LD DT, Vx
                 // Set delay timer = Vx.
@@ -349,7 +359,7 @@ impl<'a, T: display::Update> CPU<'a, T> {
             _ => (),
         };
 
-        Ok(())
+        Ok(CPUState::Running)
     }
 }
 
