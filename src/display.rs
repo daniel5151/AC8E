@@ -1,4 +1,4 @@
-#![allow(dead_code, unused_variables)]
+#![allow(dead_code)]
 
 extern crate ncurses;
 
@@ -26,6 +26,8 @@ pub trait Render {
 /*==================================
 =            Screen RAM            =
 ==================================*/
+// This struct implements the underlying DRAW instruction logic, and holds the
+// bit-arrays that represent the screen.
 
 struct ScreenRAM {
     pixels: RefCell<[[bool; 64]; 32]>,
@@ -51,20 +53,19 @@ impl Update for ScreenRAM {
                 .map(|x| ((*byte >> x) % 2) == 1)
                 .collect::<Vec<bool>>();
 
-
-            for (i, xi) in (x..(x + 8)).enumerate() {
+            for bit in 0..8usize {
                 let y = (y as usize + row) % 32;
-                let x = (xi % 64) as usize;
+                let x = (x as usize + bit) % 64;
 
                 let mut p = self.pixels.borrow_mut();
 
                 // check collision
-                if p[y][x] == true && bits[i] == true {
+                if p[y][x] == true && bits[bit] == true {
                     collision = true;
                 }
 
                 // do the xor
-                p[y][x] ^= bits[i];
+                p[y][x] ^= bits[bit];
             }
         }
 
@@ -80,6 +81,34 @@ impl Update for ScreenRAM {
 // The `Update` trait simply calls the equivalent Screen RAM's functions, and
 // the `Render` trait is used to implement different rendering modes
 
+/* ----------  Null Renderer  ---------- */
+
+pub struct NullDisplay {
+    screen: ScreenRAM,
+}
+
+impl NullDisplay {
+    pub fn new() -> NullDisplay {
+        NullDisplay { screen: ScreenRAM::new() }
+    }
+}
+
+// simply call the underlying screenRAM methods
+impl Update for NullDisplay {
+    fn clear(&self) {
+        self.screen.clear()
+    }
+    fn draw(&self, x: u8, y: u8, ram: &[u8]) -> bool {
+        self.screen.draw(x, y, ram)
+    }
+}
+
+impl Render for NullDisplay {
+    fn init(&self) {}
+    fn uninit(&self) {}
+    fn render(&self) {}
+}
+
 /* ----------  Terminal Renderer  ---------- */
 // Basic renderer to output to terminal.
 // ** Cannot be extended with associated realtime input!
@@ -94,6 +123,7 @@ impl TermDisplay {
     }
 }
 
+// simply call the underlying screenRAM methods
 impl Update for TermDisplay {
     fn clear(&self) {
         self.screen.clear()
@@ -115,7 +145,7 @@ impl Render for TermDisplay {
                 print!("{}",
                        format!("{}", self.screen.pixels.borrow()[y][x] as u8)
                            .replace("0", " ")
-                           .replace("1", "█"));
+                           .replace("1", "X"));
             }
             println!();
         }
@@ -137,6 +167,7 @@ impl NcursesDisplay {
     }
 }
 
+// simply call the underlying screenRAM methods
 impl Update for NcursesDisplay {
     fn clear(&self) {
         self.screen.clear()
@@ -146,10 +177,10 @@ impl Update for NcursesDisplay {
     }
 }
 
-use self::ncurses::*;
-
 impl Render for NcursesDisplay {
     fn init(&self) {
+        use self::ncurses::*;
+
         /* Setup ncurses. */
         initscr();
         raw();
@@ -162,11 +193,15 @@ impl Render for NcursesDisplay {
         curs_set(CURSOR_VISIBILITY::CURSOR_INVISIBLE);
     }
     fn uninit(&self) {
+        use self::ncurses::*;
+
         /* Kill ncurses. */
         endwin();
     }
 
     fn render(&self) {
+        use self::ncurses::*;
+
         mv(0, 0);
 
         for y in 0..32 {

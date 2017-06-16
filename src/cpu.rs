@@ -11,31 +11,28 @@ pub enum CPUState {
     WaitForInput,
 }
 
-pub struct CPU<'a, DisplayT: 'a + display::Update, InputT: 'a + input::Get> {
-    // PUB IS TEMPORARY, ONLY FOR DEBUG!
-    pub cycle: u32,
+pub struct CPU<'a, Dt: 'a + display::Update, It: 'a + input::Get> {
+    cycle: u32,
 
-    pub v: [u8; 16],
-    pub i: u16,
+    v: [u8; 16],
+    i: u16,
 
-    pub pc: u16,
-    pub stack: Vec<u16>,
+    pc: u16,
+    stack: Vec<u16>,
 
-    pub dt: u8,
-    pub st: u8,
+    dt: u8,
+    st: u8,
 
-    pub ram: &'a mut ram::RAM,
-    pub display: &'a DisplayT,
-    pub input: &'a InputT,
+    ram: &'a mut ram::RAM,
+    display: &'a Dt,
+    input: &'a It,
 }
 
-impl<'a, DisplayT: display::Update, InputT: input::Get> CPU<'a,
-                                                            DisplayT,
-                                                            InputT> {
+impl<'a, Dt: display::Update, It: input::Get> CPU<'a, Dt, It> {
     pub fn new(ram: &'a mut ram::RAM,
-               display: &'a DisplayT,
-               input: &'a InputT)
-               -> CPU<'a, DisplayT, InputT> {
+               display: &'a Dt,
+               input: &'a It)
+               -> CPU<'a, Dt, It> {
         // Load FONTSET into RAM
         for (i, byte) in FONTSET.iter().enumerate() {
             // i'm just going to unwrap this value, since I know it won't fail.
@@ -60,19 +57,16 @@ impl<'a, DisplayT: display::Update, InputT: input::Get> CPU<'a,
         }
     }
 
-    pub fn decrement_dt(&mut self) {
+    pub fn decrement_counters(&mut self) {
         self.dt -= if self.dt > 0 { 1 } else { 0 };
-    }
-
-    pub fn decrement_st(&mut self) {
         self.st -= if self.st > 0 { 1 } else { 0 };
     }
 
     pub fn cycle(&mut self) -> Result<CPUState, String> {
         self.cycle += 1;
 
+        // Load instr from RAM
         let instr = self.ram.load_u16(self.pc)?;
-
         self.pc += 2;
 
         // these values aren't used in *every* instruction, but they are nice
@@ -167,25 +161,24 @@ impl<'a, DisplayT: display::Update, InputT: input::Get> CPU<'a,
                 // VF is set to 1, otherwise 0. Only the lowest 8 bits
                 // of the result are kept, and stored in Vx.
                 0x4 => {
-                    let add = self.v[x].overflowing_add(self.v[y]);
-                    self.v[x] = add.0;
-                    self.v[0xF] = add.1 as u8;
+                    let add = self.v[x] as u16 + self.v[y] as u16;
+                    self.v[0xF] = (add > 0xFF) as u8;
+                    self.v[x] = add as u8;
                 }
                 // 8xy5 - SUB Vx, Vy
                 // Set Vx = Vx - Vy, set VF = NOT borrow.
                 // If Vx > Vy, then VF is set to 1, otherwise 0. Then Vy
                 // is subtracted from Vx, and the results stored in Vx.
                 0x5 => {
-                    let sub = self.v[x].overflowing_sub(self.v[y]);
-                    self.v[x] = sub.0;
-                    self.v[0xF] = sub.1 as u8;
+                    self.v[0xF] = (self.v[x] > self.v[y]) as u8;
+                    self.v[x] = self.v[x].wrapping_sub(self.v[y]);
                 }
                 // 8xy6 - SHR Vx {, Vy}
                 // Set Vx = Vx SHR 1.
                 // If the least-significant bit of Vx is 1, then VF is
                 // set to 1, otherwise 0. Then Vx is divided by 2.
                 0x6 => {
-                    self.v[0xF] = self.v[x] & 0x1;
+                    self.v[0xF] = self.v[x] & 0x01;
                     self.v[x] >>= 1;
                 }
                 // 8xy7 - SUBN Vx, Vy
@@ -193,9 +186,8 @@ impl<'a, DisplayT: display::Update, InputT: input::Get> CPU<'a,
                 // If Vy > Vx, then VF is set to 1, otherwise 0. Then Vx
                 // is subtracted from Vy, and the results stored in Vx.
                 0x7 => {
-                    let sub = self.v[y].overflowing_sub(self.v[x]);
-                    self.v[x] = sub.0;
-                    self.v[0xF] = sub.1 as u8;
+                    self.v[0xF] = (self.v[y] > self.v[x]) as u8;
+                    self.v[x] = self.v[y].wrapping_sub(self.v[x]);
                 }
                 // 8xyE - SHL Vx {, Vy}
                 // Set Vx = Vx SHL 1.
@@ -240,10 +232,9 @@ impl<'a, DisplayT: display::Update, InputT: input::Get> CPU<'a,
             // coordinates of the display, it wraps around to the opposite side
             // of the screen.
             0xD => {
-                // check for Unexpected address overflow
-                match self.i.checked_add(instr.nibble_at(3) as u16) {
-                    None => return Err("[CPU] Unexpected Overflow".to_string()),
-                    Some(_) => (),
+                // check for unexpected overflows of the I register
+                if (self.i + instr.nibble_at(3) as u16) > 0xFFF {
+                    return Err("[CPU] Unexpected Overflow".to_string());
                 }
 
                 let sprite = (self.i..(self.i + instr.nibble_at(3) as u16))
@@ -313,10 +304,6 @@ impl<'a, DisplayT: display::Update, InputT: input::Get> CPU<'a,
                 // Set I = location of sprite for digit Vx.
                 // The value of I is set to the location for the
                 // hexadecimal sprite corresponding to the value of Vx.
-                // See section 2.4, Display, for more information on the
-                // Chip-8 hexadecimal font.
-                // NOTE: Not sure how permissive I should be. I'm assuming
-                //       being strict
                 0x29 if self.v[x] <= 0xF => self.i = self.v[x] as u16 * 5,
                 0x29 => return Err("[CPU] Invalid Opcode".to_string()),
                 // Fx33 - LD B, Vx
@@ -327,9 +314,9 @@ impl<'a, DisplayT: display::Update, InputT: input::Get> CPU<'a,
                 // the tens digit at location I+1, and the ones digit at
                 // location I+2.
                 0x33 => {
-                    self.ram.store_u8(self.i + 0, self.v[x] / 1 % 10)?;
+                    self.ram.store_u8(self.i + 0, self.v[x] / 100 % 10)?;
                     self.ram.store_u8(self.i + 1, self.v[x] / 10 % 10)?;
-                    self.ram.store_u8(self.i + 2, self.v[x] / 100 % 100)?;
+                    self.ram.store_u8(self.i + 2, self.v[x] / 1 % 10)?;
                 }
                 // Fx55 - LD [I], Vx
                 // Store registers V0 through Vx in memory starting at

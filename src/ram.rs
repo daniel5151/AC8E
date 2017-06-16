@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub struct RAM {
     mem: [u8; 0x1000],
 }
@@ -6,9 +8,10 @@ fn err_oob(addr: u16) -> String {
     format!("[RAM] Address 0x{:03x} is out of bounds!", addr)
 }
 
-fn err_mis(addr: u16) -> String {
-    format!("[RAM] Address 0x{:03x} is misaligned!", addr)
-}
+// NOTE: CHIP-8 apparently allows misaligned access!
+// fn err_mis(addr: u16) -> String {
+//     format!("[RAM] Address 0x{:03x} is misaligned!", addr)
+// }
 
 impl RAM {
     pub fn new() -> RAM {
@@ -18,7 +21,7 @@ impl RAM {
     pub fn load_u16(&self, addr: u16) -> Result<u16, String> {
         match addr {
             _ if addr >= 0xFFF => return Err(err_oob(addr)),
-            _ if addr % 2 != 0 => return Err(err_mis(addr)),
+            // _ if addr % 2 != 0 => return Err(err_mis(addr)),
             _ => (), // all clear
         }
 
@@ -31,7 +34,7 @@ impl RAM {
     pub fn store_u16(&mut self, addr: u16, val: u16) -> Result<(), String> {
         match addr {
             _ if addr >= 0xFFF => return Err(err_oob(addr)),
-            _ if addr % 2 != 0 => return Err(err_mis(addr)),
+            // _ if addr % 2 != 0 => return Err(err_mis(addr)),
             _ => (), // all clear
         }
 
