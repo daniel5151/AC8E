@@ -6,6 +6,17 @@ for the language.
 
 If this code isn't :100: *idiomatic* Rust, cut me some slack :smile:
 
+#### Update:
+
+At this point, AC8E is working, and is (as far as I can tell) accurate. It's
+definately not the best CHIP-8 emulator out there, but it's mine, and hey,
+that's pretty cool.
+
+I might revisit AC8E, refactor it a bit, add a non-terminal based renderer
+(SDL?), but for now, i'm just going to let AC8E sit.
+
+Check out **THOUGHTS.md** if you'd like to read my reflections on the project.
+
 ### How To Run
 
 `cargo build --release` for a nice, optimized executable. Then, just `./target/
@@ -39,5 +50,3 @@ Right now, the following interfaces are implemented:
   - **Default Renderer**
   - Uses `ncurses-rs` to render the display, and get user input
   - **NOTE:** Requires `ncurses` to be installed as a system library
-    - _I might port this to use a pure-rust implementation later to avoid this
-       dependency_

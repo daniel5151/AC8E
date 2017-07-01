@@ -87,7 +87,8 @@ fn main() {
 
             match cpu_state {
                 cpu::CPUState::WaitForInput => {
-                    display.render(); // render the screen before blocking
+                    // render the screen before blocking
+                    display.render(cpu.is_beeping());
                     input.update_keys(true); // blocking operation
                 }
                 cpu::CPUState::Running => {
@@ -108,7 +109,7 @@ fn main() {
         input.decrement_keys();
 
         // Render the screen
-        display.render();
+        display.render(cpu.is_beeping());
     }
 
     display.uninit();

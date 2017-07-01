@@ -95,6 +95,8 @@ impl Get for NcursesInput {
     }
 }
 
+use self::ncurses as nc;
+
 impl Set for NcursesInput {
     fn decrement_keys(&self) {
         for x in self.keys.borrow_mut().iter_mut() {
@@ -103,15 +105,14 @@ impl Set for NcursesInput {
     }
 
     fn update_keys(&self, block: bool) {
-        use self::ncurses::*;
 
-        timeout(if block { -1 } else { 0 });
-        let input = getch();
+        nc::timeout(if block { -1 } else { 0 });
+        let input = nc::getch();
 
         // Match special values
         match input {
             // Exit Key
-            KEY_F1 => {
+            nc::KEY_F1 => {
                 self.exit.set(true);
                 return;
             }

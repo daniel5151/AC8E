@@ -62,6 +62,10 @@ impl<'a, Dt: display::Update, It: input::Get> CPU<'a, Dt, It> {
         self.st -= if self.st > 0 { 1 } else { 0 };
     }
 
+    pub fn is_beeping(&self) -> bool {
+        self.st != 0
+    }
+
     pub fn cycle(&mut self) -> Result<CPUState, String> {
         self.cycle += 1;
 

@@ -20,7 +20,7 @@ pub trait Update {
 pub trait Render {
     fn init(&self); // run once at start
     fn uninit(&self); // run once at end
-    fn render(&self); // run every frame
+    fn render(&self, beep: bool); // run every frame
 }
 
 /*==================================
@@ -106,7 +106,9 @@ impl Update for NullDisplay {
 impl Render for NullDisplay {
     fn init(&self) {}
     fn uninit(&self) {}
-    fn render(&self) {}
+    fn render(&self, beep: bool) {
+        drop(beep)
+    }
 }
 
 /* ----------  Terminal Renderer  ---------- */
@@ -137,7 +139,7 @@ impl Render for TermDisplay {
     fn init(&self) {}
     fn uninit(&self) {}
 
-    fn render(&self) {
+    fn render(&self, beep: bool) {
         print!("\x1b[2J\x1b[1;1H"); // magic chars to clear the term screen
 
         for y in 0..32 {
@@ -148,6 +150,10 @@ impl Render for TermDisplay {
                            .replace("1", "X"));
             }
             println!();
+        }
+
+        if beep {
+            println!("\u{0007}");
         }
     }
 }
@@ -177,43 +183,45 @@ impl Update for NcursesDisplay {
     }
 }
 
+use self::ncurses as nc;
+
 impl Render for NcursesDisplay {
     fn init(&self) {
-        use self::ncurses::*;
-
         /* Setup ncurses. */
-        initscr();
-        raw();
+        nc::initscr();
+        nc::raw();
 
         /* Allow for extended keyboard (like F1). */
-        keypad(stdscr(), true);
-        noecho();
+        nc::keypad(nc::stdscr(), true);
+        nc::noecho();
 
         /* Invisible cursor. */
-        curs_set(CURSOR_VISIBILITY::CURSOR_INVISIBLE);
+        nc::curs_set(nc::CURSOR_VISIBILITY::CURSOR_INVISIBLE);
     }
     fn uninit(&self) {
-        use self::ncurses::*;
-
         /* Kill ncurses. */
-        endwin();
+        nc::endwin();
     }
 
-    fn render(&self) {
-        use self::ncurses::*;
+    fn render(&self, beep: bool) {
 
-        mv(0, 0);
+        nc::mv(0, 0);
 
         for y in 0..32 {
             for x in 0..64 {
-                printw(format!("{}", self.screen.pixels.borrow()[y][x] as u8)
-                           .replace("0", " ")
-                           .replace("1", "X")
-                           .as_ref());
+                nc::printw(format!("{}",
+                                   self.screen.pixels.borrow()[y][x] as u8)
+                                   .replace("0", " ")
+                                   .replace("1", "X")
+                                   .as_ref());
             }
-            printw("\n");
+            nc::printw("\n");
         }
 
-        refresh();
+        if beep {
+            nc::beep();
+        }
+
+        nc::refresh();
     }
 }
