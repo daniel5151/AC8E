@@ -170,7 +170,7 @@ impl<'a, Dt: display::Update, It: input::Get> CPU<'a, Dt, It> {
                 // If Vx > Vy, then VF is set to 1, otherwise 0. Then Vy
                 // is subtracted from Vx, and the results stored in Vx.
                 0x5 => {
-                    self.v[0xF] = (self.v[x] > self.v[y]) as u8;
+                    self.v[0xF] = (self.v[x] >= self.v[y]) as u8;
                     self.v[x] = self.v[x].wrapping_sub(self.v[y]);
                 }
                 // 8xy6 - SHR Vx {, Vy}
@@ -186,7 +186,7 @@ impl<'a, Dt: display::Update, It: input::Get> CPU<'a, Dt, It> {
                 // If Vy > Vx, then VF is set to 1, otherwise 0. Then Vx
                 // is subtracted from Vy, and the results stored in Vx.
                 0x7 => {
-                    self.v[0xF] = (self.v[y] > self.v[x]) as u8;
+                    self.v[0xF] = (self.v[y] >= self.v[x]) as u8;
                     self.v[x] = self.v[y].wrapping_sub(self.v[x]);
                 }
                 // 8xyE - SHL Vx {, Vy}
@@ -197,7 +197,8 @@ impl<'a, Dt: display::Update, It: input::Get> CPU<'a, Dt, It> {
                     self.v[0xF] = self.v[x] >> 7;
                     self.v[x] <<= 1;
                 }
-                _ => return Err("[CPU] Invalid Opcode".to_string()),
+                _ => return Err(format!("[CPU] Invalid Opcode - {:04x}",
+                                        instr)),
             },
             // 9xy0 - SNE Vx, Vy
             // Skip next instruction if Vx != Vy.
@@ -264,7 +265,7 @@ impl<'a, Dt: display::Update, It: input::Get> CPU<'a, Dt, It> {
                     self.pc += 2;
                 }
             }
-            0xE => return Err("[CPU] Invalid Opcode".to_string()),
+            0xE => return Err(format!("[CPU] Invalid Opcode - {:04x}", instr)),
             0xF => match kk {
                 // Fx07 - LD Vx, DT
                 // Set Vx = delay timer value.
@@ -305,7 +306,8 @@ impl<'a, Dt: display::Update, It: input::Get> CPU<'a, Dt, It> {
                 // The value of I is set to the location for the
                 // hexadecimal sprite corresponding to the value of Vx.
                 0x29 if self.v[x] <= 0xF => self.i = self.v[x] as u16 * 5,
-                0x29 => return Err("[CPU] Invalid Opcode".to_string()),
+                0x29 => return Err(format!("[CPU] Invalid Opcode - {:04x}",
+                                           instr)),
                 // Fx33 - LD B, Vx
                 // Store BCD representation of Vx in memory locations I,
                 // I+1, and I+2.
@@ -338,7 +340,12 @@ impl<'a, Dt: display::Update, It: input::Get> CPU<'a, Dt, It> {
                         self.v[x] = self.ram.load_u8(self.i + x as u16)?;
                     }
                 }
-                _ => return Err("[CPU] Invalid Opcode".to_string()),
+
+                0x75 => { /* SCHIP-8 - IGNORED */ }
+                0x85 => { /* SCHIP-8 - IGNORED */ }
+
+                _ => return Err(format!("[CPU] Invalid Opcode - {:04x}",
+                                        instr)),
             },
             // this will never happen, but Rust doesn't know what a nibble is,
             // so it thinks that there are more cases that need to be checked.

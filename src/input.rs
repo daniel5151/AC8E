@@ -139,6 +139,6 @@ impl Set for NcursesInput {
         self.last_press.set(Some(key_pressed));
 
         // This number controls "key stickieness"
-        self.keys.borrow_mut()[key_pressed as usize] = 4;
+        self.keys.borrow_mut()[key_pressed as usize] = 8;
     }
 }
